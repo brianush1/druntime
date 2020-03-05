@@ -425,8 +425,10 @@ alias AssertHandler = void function(string file, size_t line, string msg) nothro
  */
 extern (C) void onAssertError( string file = __FILE__, size_t line = __LINE__ ) nothrow
 {
-    if ( _assertHandler is null )
-        throw new AssertError( file, line );
+    version (WebAssembly) {} else {
+        if ( _assertHandler is null )
+            throw new AssertError( file, line );
+    }
     _assertHandler( file, line, null);
 }
 
@@ -441,10 +443,19 @@ extern (C) void onAssertError( string file = __FILE__, size_t line = __LINE__ ) 
  *  line = The line number on which this error occurred.
  *  msg  = An error message supplied by the user.
  */
-extern (C) void onAssertErrorMsg( string file, size_t line, string msg ) nothrow
+extern (C) void onAssertErrorMsg( string file, size_t line, string msg ) nothrow @trusted
 {
-    if ( _assertHandler is null )
-        throw new AssertError( msg, file, line );
+    if (_assertHandler is null) {
+        version (WebAssembly)
+        {
+            import core.internal.abort : abort;
+            abort(msg, file, line);
+        } else
+        {
+            throw new AssertError( msg, file, line );
+        }
+    }
+
     _assertHandler( file, line, msg );
 }
 
@@ -479,11 +490,17 @@ extern (C) void onUnittestErrorMsg( string file, size_t line, string msg ) nothr
  * Throws:
  *  $(LREF RangeError).
  */
-extern (C) void onRangeError( string file = __FILE__, size_t line = __LINE__ ) @trusted pure nothrow @nogc
-{
-    throw staticError!RangeError( file, line, null );
-}
-
+version (WebAssembly) {
+    extern (C) void onRangeError( string file = __FILE__, size_t line = __LINE__ ) @trusted nothrow
+    {
+        onAssertErrorMsg(file, line, "onRangeError");
+    }
+} else {
+    extern (C) void onRangeError( string file = __FILE__, size_t line = __LINE__ ) @trusted nothrow @nogc
+    {
+        throw staticError!RangeError( file, line, null );
+    }
+ }
 
 /**
  * A callback for finalize errors in D.  A $(LREF FinalizeError) will be thrown.
@@ -499,9 +516,14 @@ extern (C) void onRangeError( string file = __FILE__, size_t line = __LINE__ ) @
  */
 extern (C) void onFinalizeError( TypeInfo info, Throwable e, string file = __FILE__, size_t line = __LINE__ ) @trusted nothrow
 {
-    // This error is thrown during a garbage collection, so no allocation must occur while
-    //  generating this object. So we use a preallocated instance
-    throw staticError!FinalizeError(info, e, file, line);
+    version (WebAssembly) {
+        onAssertErrorMsg( file, line, e.msg );
+    } else
+    {
+        // This error is thrown during a garbage collection, so no allocation must occur while
+        //  generating this object. So we use a preallocated instance
+        throw staticError!FinalizeError(info, e, file, line);
+    }
 }
 
 /**
@@ -513,15 +535,24 @@ extern (C) void onFinalizeError( TypeInfo info, Throwable e, string file = __FIL
  */
 extern (C) void onOutOfMemoryError(void* pretend_sideffect = null) @trusted pure nothrow @nogc /* dmd @@@BUG11461@@@ */
 {
-    // NOTE: Since an out of memory condition exists, no allocation must occur
-    //       while generating this object.
-    throw staticError!OutOfMemoryError();
+    version (WebAssembly) {
+        assert(0, "Out of memory" );
+    } else
+    {
+        // NOTE: Since an out of memory condition exists, no allocation must occur
+        //       while generating this object.
+        throw staticError!OutOfMemoryError();
+    }
 }
 
 extern (C) void onOutOfMemoryErrorNoGC() @trusted nothrow @nogc
 {
-    // suppress stacktrace until they are @nogc
-    throw staticError!OutOfMemoryError(false);
+    version (WebAssembly) {
+        assert(0, "Out of memory" );
+    } else {
+        // suppress stacktrace until they are @nogc
+        throw staticError!OutOfMemoryError(false);
+    }
 }
 
 
@@ -534,9 +565,13 @@ extern (C) void onOutOfMemoryErrorNoGC() @trusted nothrow @nogc
  */
 extern (C) void onInvalidMemoryOperationError(void* pretend_sideffect = null) @trusted pure nothrow @nogc /* dmd @@@BUG11461@@@ */
 {
-    // The same restriction applies as for onOutOfMemoryError. The GC is in an
-    // undefined state, thus no allocation must occur while generating this object.
-    throw staticError!InvalidMemoryOperationError();
+    version (WebAssembly) {
+        assert(0, "Invalid memory operation" );
+    } else {
+        // The same restriction applies as for onOutOfMemoryError. The GC is in an
+        // undefined state, thus no allocation must occur while generating this object.
+        throw staticError!InvalidMemoryOperationError();
+    }
 }
 
 /**
@@ -551,9 +586,13 @@ extern (C) void onInvalidMemoryOperationError(void* pretend_sideffect = null) @t
  * Throws:
  *  $(LREF UnicodeException).
  */
-extern (C) void onUnicodeError( string msg, size_t idx, string file = __FILE__, size_t line = __LINE__ ) @safe pure
+extern (C) void onUnicodeError( string msg, size_t idx, string file = __FILE__, size_t line = __LINE__ ) @safe
 {
-    throw new UnicodeException( msg, idx, file, line );
+    version (WebAssembly) {
+        onAssertErrorMsg(file, line, msg); // TODO: what to do with idx? is it is already in msg?
+    } else {
+        throw new UnicodeException( msg, idx, file, line );
+    }
 }
 
 /***********************************

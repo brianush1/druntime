@@ -96,3 +96,28 @@ shared static this()
 void main()
 {
 }
+
+// pragma(msg, "emit _start");
+// import ldc.attributes;
+// import core.sys.wasi.core;
+// extern (C) {
+//   pragma(mangle, "_d_run_main")
+//     int _d_run_main(int argc, char **argv, void* mainFunc);
+
+//   pragma(mangle, "_Dmain")
+//     int _Dmain(char[][] args);
+
+//   pragma(mangle, "main")
+//     int main(int argc, char **argv)
+//     {
+//       pragma(LDC_profile_instr, false);
+//       return _d_run_main(argc, argv, &_Dmain);
+//     }
+
+//   void __wasm_call_ctors();
+//   pragma(mangle, "_start")
+//     export void _start() {
+//     __wasm_call_ctors();
+//     proc_exit(main(0, null));
+//   }
+// }
