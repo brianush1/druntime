@@ -156,12 +156,12 @@ else version (Haiku)
 }
  else version (WASI_libc) {
    extern(C) {
-     __gshared extern int errno;
+       extern int errno;
    }
    extern (C)
    {
-     int getErrno() { return errno; };      // for internal use
-     int setErrno(int e) { errno = e; return 0; };   // for internal use
+       extern int getErrno();// { return errno; };      // for internal use
+       extern int setErrno(int e);// { errno = e; return 0; };   // for internal use
    }
  }
 else

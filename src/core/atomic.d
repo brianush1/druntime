@@ -564,8 +564,8 @@ TailShared!T atomicOp(string op, T, V1)(ref shared T val, V1 mod) pure nothrow @
 in (atomicValueIsProperlyAligned(val))
 {
   version (WebAssembly) {
-    mixin ("*(cast(T*)&val) "~op~" mod;");
-    return *(cast(T*)&val);
+      T get = *cast(T*)&val;
+      mixin ("return get " ~ op ~ " mod;");
   } else {
     version (LDC)
     {

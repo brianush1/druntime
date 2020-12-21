@@ -52,7 +52,7 @@ template _d_cmain()
             import core.sys.wasi.core;
             void __wasm_call_ctors();
             pragma(mangle, "_start")
-              export void _start() {
+              @weak export void _start() {
               __wasm_call_ctors();
               proc_exit(main(0, null));
             }
