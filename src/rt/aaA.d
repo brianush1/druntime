@@ -33,16 +33,14 @@ private enum HASH_EMPTY = 0;
 private enum HASH_DELETED = 0x1;
 private enum HASH_FILLED_MARK = size_t(1) << 8 * size_t.sizeof - 1;
 
-/// Opaque AA wrapper
-struct AA
+private @property bool empty(const(Impl)* impl) pure nothrow @nogc
 {
-    Impl* impl;
-    alias impl this;
+    return impl is null || !impl.length;
+}
 
-    private @property bool empty() const pure nothrow @nogc
-    {
-        return impl is null || !impl.length;
-    }
+private @property bool empty(const(Impl*)* aa) pure nothrow @nogc
+{
+    return (*aa).empty;
 }
 
 private struct Impl
@@ -494,7 +492,7 @@ private T max(T)(T a, T b) pure nothrow @nogc
 //------------------------------------------------------------------------------
 
 /// Determine number of entries in associative array.
-extern (C) size_t _aaLen(scope const AA aa) pure nothrow @nogc
+extern (C) size_t _aaLen(scope const Impl* aa) pure nothrow @nogc
 {
     return aa ? aa.length : 0;
 }
@@ -512,7 +510,7 @@ extern (C) size_t _aaLen(scope const AA aa) pure nothrow @nogc
  *      If key was not in the aa, a mutable pointer to newly inserted value which
  *      is set to all zeros
  */
-extern (C) void* _aaGetY(AA* aa, const TypeInfo_AssociativeArray ti,
+extern (C) void* _aaGetY(Impl** aa, const TypeInfo_AssociativeArray ti,
     const size_t valsz, scope const void* pkey)
 {
     bool found;
@@ -533,47 +531,47 @@ extern (C) void* _aaGetY(AA* aa, const TypeInfo_AssociativeArray ti,
  *      If key was not in the aa, a mutable pointer to newly inserted value which
  *      is set to all zeros
  */
-extern (C) void* _aaGetX(AA* aa, const TypeInfo_AssociativeArray ti,
+extern (C) void* _aaGetX(Impl** aa, const TypeInfo_AssociativeArray ti,
     const size_t valsz, scope const void* pkey, out bool found)
 {
     // lazily alloc implementation
-    if (aa.impl is null)
-        aa.impl = new Impl(ti);
+    if (*aa is null)
+        *aa = new Impl(ti);
 
     // get hash and bucket for key
     immutable hash = calcHash(pkey, ti.key);
 
     // found a value => return it
-    if (auto p = aa.findSlotLookup(hash, pkey, ti.key))
+    if (auto p = (*aa).findSlotLookup(hash, pkey, ti.key))
     {
         found = true;
-        return p.entry + aa.valoff;
+        return p.entry + (*aa).valoff;
     }
 
-    auto p = aa.findSlotInsert(hash);
+    auto p = (*aa).findSlotInsert(hash);
     if (p.deleted)
-        --aa.deleted;
+        --(*aa).deleted;
     // check load factor and possibly grow
-    else if (++aa.used * GROW_DEN > aa.dim * GROW_NUM)
+    else if (++(*aa).used * GROW_DEN > (*aa).dim * GROW_NUM)
     {
-        aa.grow(ti.key);
-        p = aa.findSlotInsert(hash);
+        (*aa).grow(ti.key);
+        p = (*aa).findSlotInsert(hash);
         assert(p.empty);
     }
 
     // update search cache and allocate entry
-    aa.firstUsed = min(aa.firstUsed, cast(uint)(p - aa.buckets.ptr));
+    (*aa).firstUsed = min((*aa).firstUsed, cast(uint)(p - (*aa).buckets.ptr));
     p.hash = hash;
-    p.entry = allocEntry(aa.impl, pkey);
+    p.entry = allocEntry(*aa, pkey);
     // postblit for key
-    if (aa.flags & Impl.Flags.keyHasPostblit)
+    if ((*aa).flags & Impl.Flags.keyHasPostblit)
     {
         import rt.lifetime : __doPostblit, unqualify;
 
-        __doPostblit(p.entry, aa.keysz, unqualify(ti.key));
+        __doPostblit(p.entry, (*aa).keysz, unqualify(ti.key));
     }
     // return pointer to value
-    return p.entry + aa.valoff;
+    return p.entry + (*aa).valoff;
 }
 
 /******************************
@@ -587,7 +585,7 @@ extern (C) void* _aaGetX(AA* aa, const TypeInfo_AssociativeArray ti,
  * Returns:
  *      pointer to value if present, null otherwise
  */
-extern (C) inout(void)* _aaGetRvalueX(inout AA aa, scope const TypeInfo keyti, const size_t valsz,
+extern (C) inout(void)* _aaGetRvalueX(inout Impl* aa, scope const TypeInfo keyti, const size_t valsz,
     scope const void* pkey)
 {
     return _aaInX(aa, keyti, pkey);
@@ -603,7 +601,7 @@ extern (C) inout(void)* _aaGetRvalueX(inout AA aa, scope const TypeInfo keyti, c
  * Returns:
  *      pointer to value if present, null otherwise
  */
-extern (C) inout(void)* _aaInX(inout AA aa, scope const TypeInfo keyti, scope const void* pkey)
+extern (C) inout(void)* _aaInX(inout Impl* aa, scope const TypeInfo keyti, scope const void* pkey)
 {
     if (aa.empty)
         return null;
@@ -615,7 +613,7 @@ extern (C) inout(void)* _aaInX(inout AA aa, scope const TypeInfo keyti, scope co
 }
 
 /// Delete entry scope const AA, return true if it was present
-extern (C) bool _aaDelX(AA aa, scope const TypeInfo keyti, scope const void* pkey)
+extern (C) bool _aaDelX(Impl* aa, scope const TypeInfo keyti, scope const void* pkey)
 {
     if (aa.empty)
         return false;
@@ -637,24 +635,24 @@ extern (C) bool _aaDelX(AA aa, scope const TypeInfo keyti, scope const void* pke
 }
 
 /// Remove all elements from AA.
-extern (C) void _aaClear(AA aa) pure nothrow
+extern (C) void _aaClear(Impl* aa) pure nothrow
 {
     if (!aa.empty)
     {
-        aa.impl.clear();
+        aa.clear();
     }
 }
 
 /// Rehash AA
-extern (C) void* _aaRehash(AA* paa, scope const TypeInfo keyti) pure nothrow
+extern (C) void* _aaRehash(Impl** paa, scope const TypeInfo keyti) pure nothrow
 {
     if (!paa.empty)
-        paa.resize(nextpow2(INIT_DEN * paa.length / INIT_NUM));
+        (*paa).resize(nextpow2(INIT_DEN * (*paa).length / INIT_NUM));
     return *paa;
 }
 
 /// Return a GC allocated array of all values
-extern (C) inout(void[]) _aaValues(inout AA aa, const size_t keysz, const size_t valsz,
+extern (C) inout(void[]) _aaValues(inout Impl* aa, const size_t keysz, const size_t valsz,
     const TypeInfo tiValueArray) pure nothrow
 {
     if (aa.empty)
@@ -678,7 +676,7 @@ extern (C) inout(void[]) _aaValues(inout AA aa, const size_t keysz, const size_t
 }
 
 /// Return a GC allocated array of all keys
-extern (C) inout(void[]) _aaKeys(inout AA aa, const size_t keysz, const TypeInfo tiKeyArray) pure nothrow
+extern (C) inout(void[]) _aaKeys(inout Impl* aa, const size_t keysz, const TypeInfo tiKeyArray) pure nothrow
 {
     if (aa.empty)
         return null;
@@ -704,7 +702,7 @@ extern (D) alias dg_t = int delegate(void*);
 extern (D) alias dg2_t = int delegate(void*, void*);
 
 /// foreach opApply over all values
-extern (C) int _aaApply(AA aa, const size_t keysz, dg_t dg)
+extern (C) int _aaApply(Impl* aa, const size_t keysz, dg_t dg)
 {
     if (aa.empty)
         return 0;
@@ -721,7 +719,7 @@ extern (C) int _aaApply(AA aa, const size_t keysz, dg_t dg)
 }
 
 /// foreach opApply over all key/value pairs
-extern (C) int _aaApply2(AA aa, const size_t keysz, dg2_t dg)
+extern (C) int _aaApply2(Impl* aa, const size_t keysz, dg2_t dg)
 {
     if (aa.empty)
         return 0;
@@ -786,9 +784,9 @@ extern (C) Impl* _d_assocarrayliteralTX(const TypeInfo_AssociativeArray ti, void
 }
 
 /// compares 2 AAs for equality
-extern (C) int _aaEqual(scope const TypeInfo tiRaw, scope const AA aa1, scope const AA aa2)
+extern (C) int _aaEqual(scope const TypeInfo tiRaw, scope const Impl* aa1, scope const Impl* aa2)
 {
-    if (aa1.impl is aa2.impl)
+    if (aa1 is aa2)
         return true;
 
     immutable len = _aaLen(aa1);
@@ -816,7 +814,7 @@ extern (C) int _aaEqual(scope const TypeInfo tiRaw, scope const AA aa1, scope co
 }
 
 /// compute a hash
-extern (C) hash_t _aaGetHash(scope const AA* aa, scope const TypeInfo tiRaw) nothrow
+extern (C) hash_t _aaGetHash(scope const Impl** aa, scope const TypeInfo tiRaw) nothrow
 {
     if (aa.empty)
         return 0;
@@ -825,12 +823,12 @@ extern (C) hash_t _aaGetHash(scope const AA* aa, scope const TypeInfo tiRaw) not
 
     auto uti = unqualify(tiRaw);
     auto ti = *cast(TypeInfo_AssociativeArray*)&uti;
-    immutable off = aa.valoff;
+    immutable off = (*aa).valoff;
     auto keyHash = &ti.key.getHash;
     auto valHash = &ti.value.getHash;
 
     size_t h;
-    foreach (b; aa.buckets)
+    foreach (b; (*aa).buckets)
     {
         if (!b.filled)
             continue;
@@ -854,7 +852,7 @@ struct Range
 
 extern (C) pure nothrow @nogc @safe
 {
-    Range _aaRange(AA aa)
+    Range _aaRange(Impl* aa)
     {
         if (!aa)
             return Range();
@@ -862,7 +860,7 @@ extern (C) pure nothrow @nogc @safe
         foreach (i; aa.firstUsed .. aa.dim)
         {
             if (aa.buckets[i].filled)
-                return Range(aa.impl, i);
+                return Range(aa, i);
         }
         return Range(aa, aa.dim);
     }
